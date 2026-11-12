@@ -206,6 +206,27 @@ t.test('eacces/eperm', async t => {
   }
 })
 
+t.test('eacces on a sibling of the cache folder is not blamed on the cache', async t => {
+  mockGlobals(t, { 'process.platform': 'linux' })
+  const { errorMessage, cache } = await loadMockNpm(t)
+  // e.g. ~/.npmrc when the cache is ~/.npm
+  const er = Object.assign(new Error('whoopsie'), {
+    code: 'EACCES',
+    path: `${cache}rc`,
+    stack: 'dummy stack trace',
+  })
+  const { summary, detail } = errorMessage(er)
+  t.notMatch(JSON.stringify(summary), 'root-owned', 'does not blame the cache folder')
+  t.match(JSON.stringify(detail), 'It is likely you do not have the permissions to access this file')
+
+  const inside = Object.assign(new Error('whoopsie'), {
+    code: 'EACCES',
+    path: cache,
+    stack: 'dummy stack trace',
+  })
+  t.match(JSON.stringify(errorMessage(inside).summary), 'root-owned', 'the cache folder itself still matches')
+})
+
 t.test('json parse', t => {
   mockGlobals(t, { 'process.argv': ['arg', 'v'] })
 
