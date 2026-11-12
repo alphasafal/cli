@@ -451,11 +451,32 @@ class Shrinkwrap {
     }
   }
 
+  // npm-shrinkwrap.json is no longer read. Warn once per project, so an existing one is not silently replaced by a fresh resolution.
+  static #warnedShrinkwrap = new Set()
+
+  async #warnIgnoredShrinkwrap (hasPackageLock) {
+    if (Shrinkwrap.#warnedShrinkwrap.has(this.path)) {
+      return
+    }
+    const exists = await stat(resolve(this.path, 'npm-shrinkwrap.json')).then(st => st.isFile(), () => false)
+    if (!exists) {
+      return
+    }
+    Shrinkwrap.#warnedShrinkwrap.add(this.path)
+    log.warn('shrinkwrap', hasPackageLock
+      ? 'npm-shrinkwrap.json is no longer used and is ignored in favor of package-lock.json. You can delete it.'
+      : 'npm-shrinkwrap.json is no longer used and is ignored, so the versions it locks are not installed. ' +
+        'Rename it to package-lock.json to keep them.')
+  }
+
   async load () {
     let data
     try {
       const [lock, yarn] = await this.loadFiles
       data = lock || '{}'
+      if (!this.hiddenLockfile) {
+        await this.#warnIgnoredShrinkwrap(Boolean(lock))
+      }
 
       if (this.hiddenLockfile) {
         this.filename = resolve(this.path, 'node_modules/.package-lock.json')

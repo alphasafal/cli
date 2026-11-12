@@ -1871,3 +1871,43 @@ t.test('setting lockfileVersion from the file contents', async t => {
       }
     })
 })
+
+t.test('warns once when an npm-shrinkwrap.json is present but ignored', async t => {
+  const warnings = []
+  const onlog = (...msg) => msg[0] === 'warn' && msg[1] === 'shrinkwrap' && warnings.push(msg)
+  process.on('log', onlog)
+  t.teardown(() => process.removeListener('log', onlog))
+
+  const lockfile = JSON.stringify({ name: 'x', version: '1.0.0', lockfileVersion: 3, packages: {} })
+  const dir = t.testdir({
+    'sw-only': {
+      'package.json': JSON.stringify({ name: 'x', version: '1.0.0' }),
+      'npm-shrinkwrap.json': lockfile,
+    },
+    both: {
+      'package.json': JSON.stringify({ name: 'x', version: '1.0.0' }),
+      'npm-shrinkwrap.json': lockfile,
+      'package-lock.json': lockfile,
+    },
+    'sw-dir': {
+      'package.json': JSON.stringify({ name: 'x', version: '1.0.0' }),
+      'npm-shrinkwrap.json': {},
+    },
+  })
+
+  const swOnly = await Shrinkwrap.load({ path: resolve(dir, 'sw-only') })
+  t.equal(swOnly.loadedFromDisk, false, 'npm-shrinkwrap.json is still not loaded')
+  t.match(warnings, [['warn', 'shrinkwrap', /is ignored, so the versions it locks are not installed\. Rename it to package-lock\.json/]])
+
+  await Shrinkwrap.load({ path: resolve(dir, 'sw-only') })
+  await Shrinkwrap.load({ path: resolve(dir, 'sw-only'), hiddenLockfile: true })
+  t.equal(warnings.length, 1, 'warned only once for the same project')
+
+  const both = await Shrinkwrap.load({ path: resolve(dir, 'both') })
+  t.equal(both.loadedFromDisk, true, 'package-lock.json is loaded')
+  t.match(warnings[1], ['warn', 'shrinkwrap', /ignored in favor of package-lock\.json/])
+
+  await Shrinkwrap.load({ path: resolve(dir, 'sw-dir') })
+  await Shrinkwrap.load({ path: emptyFixture })
+  t.equal(warnings.length, 2, 'no warning without an npm-shrinkwrap.json file')
+})
