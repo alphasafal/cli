@@ -802,3 +802,34 @@ t.test('versionedKeyFor — registry resolved that versionFromTgz cannot parse r
     resolved, isRegistryDependency: true,
   }), null, 'falls back when node has neither path nor name')
 })
+
+t.test('absolute local file keys are written relative to the project root', async t => {
+  const rootPath = path.resolve('project')
+  const installedCopy = {
+    // a local directory dependency installed with --install-links: resolved is an absolute path on this machine
+    name: 'local',
+    packageName: 'local',
+    version: '1.0.0',
+    resolved: `file:${path.resolve(rootPath, 'packages', 'local')}`,
+    root: { path: rootPath },
+    isRegistryDependency: false,
+  }
+  t.equal(nameKeyFor(installedCopy), 'file:packages/local')
+  t.equal(versionedKeyFor(installedCopy), 'file:packages/local')
+  const { allowScripts } = applyApprovalForPackage({}, [installedCopy], { pin: true })
+  t.strictSame(allowScripts, { 'file:packages/local': true }, 'no machine-specific path is written')
+  t.equal(isScriptAllowed(installedCopy, allowScripts), true, 'the portable key still matches')
+
+  const outside = { ...installedCopy, resolved: `file:${path.resolve(rootPath, '..', 'sibling')}` }
+  t.equal(nameKeyFor(outside), 'file:../sibling', 'paths outside the project stay relative too')
+  t.equal(isScriptAllowed(outside, { 'file:../sibling': true }), true)
+
+  const atRoot = { ...installedCopy, resolved: `file:${rootPath}` }
+  t.equal(nameKeyFor(atRoot), 'file:.')
+
+  const bare = { ...installedCopy, resolved: path.resolve(rootPath, 'packages', 'local') }
+  t.equal(nameKeyFor(bare), 'file:packages/local', 'a bare absolute path is handled the same way')
+
+  const noRoot = { ...installedCopy, root: undefined }
+  t.equal(nameKeyFor(noRoot), installedCopy.resolved, 'without a known root the key is unchanged')
+})
