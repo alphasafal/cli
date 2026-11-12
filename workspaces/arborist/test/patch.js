@@ -63,6 +63,24 @@ t.test('refuses to write outside the package directory', async t => {
   )
 })
 
+t.test('patches files and folders whose names start with ".."', async t => {
+  const dir = t.testdir({ '..data': { 'x.js': 'a\n' }, '..rc': 'b\n' })
+  await applyPatchToDir({
+    patch: filePatch('..data/x.js', 'a\n', 'A\n') + filePatch('..rc', 'b\n', 'B\n'),
+    cwd: dir,
+  })
+  t.equal(readFileSync(resolve(dir, '..data', 'x.js'), 'utf8'), 'A\n')
+  t.equal(readFileSync(resolve(dir, '..rc'), 'utf8'), 'B\n')
+})
+
+t.test('still refuses a ".." segment that resolves outside', async t => {
+  const dir = t.testdir({ sub: { 'index.js': 'x\n' } })
+  await t.rejects(
+    applyPatchToDir({ patch: filePatch('sub/../../escape.js', '', 'pwned\n'), cwd: dir }),
+    { code: 'EPATCHUNSAFE' }
+  )
+})
+
 t.test('refuses an absolute-path target', async t => {
   const dir = t.testdir({ 'index.js': 'x\n' })
   await t.rejects(

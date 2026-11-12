@@ -4,7 +4,7 @@ const { applyPatch, parsePatch } = require('diff')
 const ssri = require('ssri')
 const fs = require('node:fs')
 const { promises: fsp } = fs
-const { resolve, relative, dirname, isAbsolute } = require('node:path')
+const { resolve, relative, dirname, isAbsolute, sep } = require('node:path')
 
 // Compute the SSRI integrity of a patch file's contents.
 // Accepts a string or Buffer and returns a sha512 SSRI string.
@@ -26,7 +26,8 @@ const patchError = (message, code, file) =>
 const containedTarget = (cwd, file) => {
   const target = resolve(cwd, file)
   const rel = relative(cwd, target)
-  if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
+  // only a leading ".." segment escapes; names like "..data" are inside cwd
+  if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
     throw patchError(`patch path escapes the package directory: ${file}`, 'EPATCHUNSAFE', file)
   }
   return target

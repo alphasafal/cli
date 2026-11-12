@@ -49,6 +49,35 @@ t.test('attaches node.patched on an exact match', async t => {
   t.match(dep.patched.integrity, /^sha512-/, 'records the sha512 integrity')
 })
 
+t.test('accepts a patch folder whose name starts with ".."', async t => {
+  const path = t.testdir({
+    '..patches': { 'fix.patch': PATCH },
+    'package.json': JSON.stringify({
+      name: 'root',
+      version: '1.0.0',
+      dependencies: { dep: '^1.0.0' },
+      patchedDependencies: { 'dep@1.0.0': '..patches/fix.patch' },
+    }),
+    'package-lock.json': JSON.stringify({
+      name: 'root',
+      version: '1.0.0',
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        '': { name: 'root', version: '1.0.0', dependencies: { dep: '^1.0.0' } },
+        'node_modules/dep': lockEntry('dep', '1.0.0'),
+      },
+    }),
+    node_modules: {
+      dep: { 'package.json': JSON.stringify({ name: 'dep', version: '1.0.0' }) },
+    },
+  })
+
+  const tree = await buildIdeal(path)
+  const dep = tree.inventory.query('name', 'dep').values().next().value
+  t.equal(dep.patched.path, '..patches/fix.patch', 'the patch inside the project is used')
+})
+
 t.test('no patchedDependencies is a no-op', async t => {
   // empty patchedDependencies hits the early return guard
   const path = t.testdir({

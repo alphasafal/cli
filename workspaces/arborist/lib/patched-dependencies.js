@@ -4,7 +4,7 @@
 const semver = require('semver')
 const npa = require('npm-package-arg')
 const { log } = require('proc-log')
-const { resolve, relative, isAbsolute } = require('node:path')
+const { resolve, relative, isAbsolute, sep } = require('node:path')
 const { readFile } = require('node:fs/promises')
 const { patchIntegrity } = require('./patch.js')
 
@@ -76,7 +76,7 @@ const resolvePatchedDependencies = async (tree, { path, allowUnusedPatches, rm }
     // patch files must live inside the project so the patch set stays auditable
     const abs = resolve(path, patchPath)
     const rel = relative(path, abs)
-    if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
+    if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
       throw err(`patch path escapes the project: ${patchPath}`, 'EPATCHUNSAFE', { path: patchPath })
     }
     let contents
