@@ -170,6 +170,49 @@ t.test('deleting config invalidates flattened options', async t => {
   t.not(config.flat, before)
 })
 
+t.test('validating config invalidates flattened options', async t => {
+  const path = t.testdir({
+    '.npmrc': 'allow-git=bogus\ninstall-strategy=bogus\n',
+    'package.json': '{}',
+  })
+  const config = new Config({
+    npmPath: path,
+    cwd: path,
+    env: {},
+    argv: [],
+    definitions,
+    shorthands,
+    flatten,
+  })
+  await config.load()
+  // flattened before validation, as npm does when it sets up output
+  const before = config.flat
+  t.equal(before.allowGit, 'bogus')
+  t.equal(config.validate(), false, 'invalid values are reported')
+  t.equal(config.get('allow-git'), 'none', 'invalid value falls back to the default')
+  t.not(config.flat, before, 'flattened options are rebuilt')
+  t.equal(config.flat.allowGit, 'none', 'flattened options drop the invalid value')
+  t.equal(config.flat.installStrategy, 'hoisted')
+})
+
+t.test('validating valid config keeps flattened options', async t => {
+  const path = t.testdir({ '.npmrc': 'allow-git=root\n', 'package.json': '{}' })
+  const config = new Config({
+    npmPath: path,
+    cwd: path,
+    env: {},
+    argv: [],
+    definitions,
+    shorthands,
+    flatten,
+  })
+  await config.load()
+  const before = config.flat
+  t.equal(config.validate(), true)
+  t.equal(config.flat, before, 'cache is reused when nothing changed')
+  t.equal(config.flat.allowGit, 'root')
+})
+
 t.test('load from files and environment variables', t => {
   // need to get the dir because we reference it in the contents
   const path = t.testdir()

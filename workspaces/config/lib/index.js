@@ -503,6 +503,10 @@ class Config {
       nopt.clean(obj.data, this.types, typeDefs)
 
       nopt.invalidHandler = null
+      // clean() removes invalid values, so a cached flat object would still hold them
+      if (!obj[_valid]) {
+        this.#flatOptions = null
+      }
       return obj[_valid]
     }
   }
