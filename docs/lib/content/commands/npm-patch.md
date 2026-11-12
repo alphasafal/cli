@@ -30,6 +30,9 @@ package literally named like a subcommand must use the explicit form, e.g.
     package tarball into a temporary directory outside `node_modules` and prints
     its path. Edit the files there, then run `npm patch commit`.
 
+    If a patch already applies to that version, it is applied to the copy first, so the next commit keeps those changes and adds yours.
+    If it no longer applies, npm warns and leaves a clean copy.
+
     If more than one version of `<pkg>` is installed, re-run with an exact
     selector such as `npm patch add lodash@4.17.21`.
 

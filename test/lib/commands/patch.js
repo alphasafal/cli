@@ -1385,3 +1385,122 @@ t.test('install honors --allow-unused-patches only from the cli', async t => {
     await t.rejects(npm.exec('install', []), { code: 'EPATCHUNUSED' })
   })
 })
+
+t.test('add starts from the existing patch, so a second commit keeps the first edit', async t => {
+  const { npm, joinedOutput, registry, outputs } = await loadMockNpm(t, {
+    config: { 'ignore-scripts': true, audit: false },
+    strictRegistryNock: false,
+    prefixDir: basePrefix(),
+  })
+  await setupDep(npm, registry)
+  await npm.exec('install', [])
+  const editDirOf = out => out.match(/You can now edit the following directory: (.+)/)[1].trim()
+
+  outputs.length = 0
+  await npm.exec('patch', ['add', DEP_NAME])
+  const first = editDirOf(joinedOutput())
+  fs.writeFileSync(path.join(first, 'index.js'), 'module.exports = function () { return "first" }\n')
+  fs.writeFileSync(path.join(first, 'extra.js'), 'module.exports = 1\n')
+  await npm.exec('patch', ['commit', first])
+
+  outputs.length = 0
+  await npm.exec('patch', ['add', DEP_NAME])
+  const addOut = joinedOutput()
+  t.match(addOut, /Applied the existing patch patches\/patch-me@1\.0\.0\.patch/, 'says the existing patch was applied')
+  const second = editDirOf(addOut)
+  t.equal(fs.readFileSync(path.join(second, 'index.js'), 'utf8'),
+    'module.exports = function () { return "first" }\n', 'edit dir starts from the patched file')
+  t.ok(fs.existsSync(path.join(second, 'extra.js')), 'files added by the patch are present')
+
+  fs.writeFileSync(path.join(second, 'extra.js'), 'module.exports = 2\n')
+  await npm.exec('patch', ['commit', second])
+  const patch = fs.readFileSync(path.join(npm.prefix, 'patches', `${DEP_NAME}@${DEP_VERSION}.patch`), 'utf8')
+  t.match(patch, /first/, 'the first edit is still in the patch')
+  t.match(patch, /module\.exports = 2/, 'the second edit is in the patch')
+})
+
+t.test('add falls back to a clean copy when the existing patch no longer applies', async t => {
+  const { npm, joinedOutput, registry, logs } = await loadMockNpm(t, {
+    config: { 'ignore-scripts': true, audit: false },
+    strictRegistryNock: false,
+    prefixDir: {
+      ...basePrefix(),
+      'package.json': JSON.stringify({
+        ...rootPackageJson,
+        patchedDependencies: { [`${DEP_NAME}@${DEP_VERSION}`]: 'patches/stale.patch' },
+      }),
+      patches: {
+        'stale.patch': '--- a/index.js\n+++ b/index.js\n@@ -1,1 +1,1 @@\n-something else\n+changed\n',
+      },
+    },
+  })
+  await setupDep(npm, registry)
+  await npm.exec('patch', ['add', `${DEP_NAME}@${DEP_VERSION}`])
+  t.match(logs.warn.byTitle('patch')[0], /could not apply the existing patch patches\/stale\.patch .*starting from a clean copy instead/)
+  const editDir = joinedOutput().match(/You can now edit the following directory: (.+)/)[1].trim()
+  t.equal(fs.readFileSync(path.join(editDir, 'index.js'), 'utf8'), DEP_SRC, 'edit dir holds the clean file')
+})
+
+t.test('add ignores existing patches that are ambiguous or point outside the project', async t => {
+  for (const [label, patchedDependencies] of [
+    ['outside', { [`${DEP_NAME}@${DEP_VERSION}`]: '../outside.patch' }],
+    ['ambiguous', { [`${DEP_NAME}@1.0.x`]: 'patches/a.patch', [`${DEP_NAME}@>=0.9.0 <1.0.5`]: 'patches/b.patch' }],
+    ['other package', { 'something-else@1.0.0': 'patches/x.patch' }],
+  ]) {
+    await t.test(label, async t => {
+      const { npm, joinedOutput, registry } = await loadMockNpm(t, {
+        config: { 'ignore-scripts': true, audit: false },
+        strictRegistryNock: false,
+        prefixDir: {
+          ...basePrefix(),
+          'package.json': JSON.stringify({ ...rootPackageJson, patchedDependencies }),
+        },
+      })
+      await setupDep(npm, registry)
+      await npm.exec('patch', ['add', `${DEP_NAME}@${DEP_VERSION}`])
+      t.notMatch(joinedOutput(), /Applied the existing patch/)
+      const editDir = joinedOutput().match(/You can now edit the following directory: (.+)/)[1].trim()
+      t.equal(fs.readFileSync(path.join(editDir, 'index.js'), 'utf8'), DEP_SRC)
+    })
+  }
+})
+
+t.test('add does not apply the existing patch over a reused edit dir', async t => {
+  const { npm, joinedOutput, registry, outputs } = await loadMockNpm(t, {
+    config: { 'ignore-scripts': true, audit: false },
+    strictRegistryNock: false,
+    prefixDir: {
+      ...basePrefix(),
+      'package.json': JSON.stringify({
+        ...rootPackageJson,
+        patchedDependencies: { [`${DEP_NAME}@${DEP_VERSION}`]: 'patches/p.patch' },
+      }),
+      patches: {
+        'p.patch': `--- a/index.js\n+++ b/index.js\n@@ -1,1 +1,1 @@\n-${DEP_SRC.trim()}\n+module.exports = 'from patch'\n`,
+      },
+      'my-edit-dir': { 'unfinished.js': 'work in progress\n' },
+    },
+  })
+  await setupDep(npm, registry)
+  npm.config.set('edit-dir', path.join(npm.prefix, 'my-edit-dir'))
+  await npm.exec('patch', ['add', `${DEP_NAME}@${DEP_VERSION}`])
+  t.notMatch(joinedOutput(), /Applied the existing patch/, 'unfinished edits are left alone')
+
+  outputs.length = 0
+  npm.config.set('ignore-existing', true)
+  await npm.exec('patch', ['add', `${DEP_NAME}@${DEP_VERSION}`])
+  t.match(joinedOutput(), /Applied the existing patch patches\/p\.patch/, 'a reset edit dir starts from the patch')
+  t.equal(fs.readFileSync(path.join(npm.prefix, 'my-edit-dir', 'index.js'), 'utf8'), "module.exports = 'from patch'\n")
+})
+
+t.test('add with an explicit version works without a project package.json', async t => {
+  const { npm, joinedOutput, registry } = await loadMockNpm(t, {
+    config: { 'ignore-scripts': true, audit: false },
+    strictRegistryNock: false,
+    prefixDir: { 'dep-tarball': depTarball },
+  })
+  await setupDep(npm, registry)
+  await npm.exec('patch', ['add', `${DEP_NAME}@${DEP_VERSION}`])
+  t.match(joinedOutput(), /You can now edit the following directory: /)
+  t.notMatch(joinedOutput(), /Applied the existing patch/)
+})
