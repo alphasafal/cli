@@ -356,3 +356,15 @@ t.test('onExit handler', async (t) => {
   onExitHandler()
   t.ok(rmdirSyncCalls > 0, 'should have removed outstanding locks')
 })
+
+t.test('EPERM creating the lock when no lock exists gives up instead of looping', async (t) => {
+  // e.g. the npx cache folder cannot be written; this is not contention, so it must not retry forever
+  let mkdirCalls = 0
+  mockMkdir = async () => {
+    mkdirCalls++
+    throw Object.assign(new Error('EPERM: operation not permitted, mkdir'), { code: 'EPERM' })
+  }
+  const lockPath = path.join(fs.mkdtempSync(path.join(getTempDir(), 'test-')), 'concurrency.lock')
+  await t.rejects(withLock(lockPath, async () => 'never'), { code: 'EPERM' })
+  t.equal(mkdirCalls, 6, 'tries once, then retries 5 times with backoff')
+})

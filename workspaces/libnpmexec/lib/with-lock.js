@@ -23,6 +23,9 @@ const touchInterval = 1_000
 // use a reasonably large threshold, in case stat calls take a while
 const staleThreshold = 60_000
 
+// how many times to retry when mkdir fails with EBUSY/EPERM but no lock exists; that is not contention, so it must not retry forever
+const maxUnlockedFailures = 5
+
 // track current locks and their cleanup functions
 const currentLocks = new Map()
 
@@ -67,6 +70,7 @@ async function withLock (lockPath, cb) {
 }
 
 function acquireLock (lockPath) {
+  let unlockedFailures = 0
   return promiseRetry(async (retry) => {
     try {
       await fs.mkdir(lockPath)
@@ -76,6 +80,16 @@ function acquireLock (lockPath) {
       }
 
       const status = await getLockStatus(lockPath)
+
+      // no lock exists, so mkdir itself failed, e.g. EPERM on a folder npm cannot write to.
+      // Windows can report EBUSY/EPERM briefly while another process removes the lock, so retry with backoff a few times, then give up.
+      // Retrying immediately here used to loop forever and exhaust memory.
+      if (status === 'unlocked' && err.code !== 'EEXIST') {
+        if (++unlockedFailures > maxUnlockedFailures) {
+          throw err
+        }
+        return retry(err)
+      }
 
       if (status === 'locked') {
         // let's see if we can acquire it on the next attempt 🤞
